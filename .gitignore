@@ -1,0 +1,11 @@
+# Zugangsdaten und Laufzeitdaten – niemals einchecken
+server/config.php
+server/data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.log
+
+# Agent-Konfiguration mit Token (beim lokalen Testen)
+agent/config.json
