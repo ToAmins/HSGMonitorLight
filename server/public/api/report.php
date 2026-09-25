@@ -44,13 +44,20 @@ try {
         respond(401, ['ok' => false, 'error' => 'Unbekannter Token']);
     }
 
+    // Der Agent meldet sich stündlich; alles deutlich Schnellere wird abgewiesen.
+    $since = seconds_since_last_report($device);
+    if ($since !== null && $since < REPORT_MIN_INTERVAL) {
+        header('Retry-After: ' . (REPORT_MIN_INTERVAL - $since));
+        respond(429, ['ok' => false, 'error' => 'Zu viele Meldungen']);
+    }
+
     $payload = json_decode($raw, true, 16);
     if (!is_array($payload) || ($payload['schema_version'] ?? null) !== REPORT_SCHEMA) {
         respond(400, ['ok' => false, 'error' => 'Meldung hat nicht das erwartete Format']);
     }
 
     // Die öffentliche IP bestimmt der Server selbst – die Angabe des Geräts ließe sich fälschen.
-    store_report((int) $device['id'], $payload, (string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    store_report((int) $device['id'], $payload, client_ip());
     respond(200, ['ok' => true]);
 } catch (Throwable $e) {
     error_log('HSGMonitorLight report.php: ' . $e->getMessage());

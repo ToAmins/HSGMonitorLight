@@ -28,17 +28,23 @@ $error = null;
 
 if ($isPost && $configured) {
     check_csrf();
+    $ip = client_ip();
     $user = (string) ($_POST['user'] ?? '');
     $password = (string) ($_POST['password'] ?? '');
-    if (hash_equals((string) config('admin_user'), $user)
+    if (login_blocked($ip)) {
+        // Gar nicht erst prüfen – so lässt sich auch ein richtiges Passwort nicht "erraten".
+        $error = 'Zu viele Fehlversuche. Bitte in ' . LOGIN_WINDOW_MINUTES . ' Minuten erneut versuchen.';
+    } elseif (hash_equals((string) config('admin_user'), $user)
         && password_verify($password, (string) config('admin_password_hash'))) {
+        clear_login_failures($ip);
         session_regenerate_id(true);
         $_SESSION['user'] = $user;
         header('Location: ' . $next, true, 303);
         exit;
+    } else {
+        record_login_failure($ip);
+        $error = 'Benutzername oder Passwort stimmt nicht.';
     }
-    sleep(2); // bremst das Durchprobieren von Passwörtern
-    $error = 'Benutzername oder Passwort stimmt nicht.';
 }
 
 page_header('Anmelden');

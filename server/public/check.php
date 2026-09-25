@@ -30,8 +30,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
 $docRoot = realpath((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''));
 $checks = [
-    ['PHP ' . PHP_VERSION, version_compare(PHP_VERSION, '8.1', '>='),
-        'Mindestens PHP 8.1 nötig. Im KAS bei der Subdomain eine neuere PHP-Version wählen.'],
+    ['PHP ' . PHP_VERSION, version_compare(PHP_VERSION, '8.3', '>='),
+        'Läuft ab PHP 8.1, aber ältere Versionen als 8.3 bekommen bald oder schon keine Sicherheitsupdates mehr. Im KAS bei der Subdomain PHP 8.3 oder neuer wählen.'],
     ['SQLite (pdo_sqlite)', extension_loaded('pdo_sqlite'),
         'Die Erweiterung fehlt. Beim Hoster nachfragen.'],
     ['HTTPS', is_https(),

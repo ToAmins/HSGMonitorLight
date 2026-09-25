@@ -138,8 +138,9 @@ monitor/
 - `devices`: ID, Anzeigename, Token-Hash, angelegt am, zuletzt gesehen, letzte IP und ein Verweis auf die letzte Meldung.
   Die Details liest die Übersicht direkt aus dieser Meldung. So braucht ein neues Feld im Agenten keine Änderung an der Datenbank.
 - `reports`: ID, Gerät, Empfangszeit, öffentliche IP, Rohdaten (JSON).
-- Meldungen werden **180 Tage** aufbewahrt. Aufgeräumt wird täglich per KAS-Cronjob (`cron.php`).
-  Ersatzweise räumt auch jede eingehende Meldung auf, höchstens einmal am Tag. So funktioniert es auch ohne Cronjob.
+- Meldungen werden **180 Tage** aufbewahrt, pro Gerät höchstens 2000. Aufgeräumt wird bei jeder eingehenden Meldung
+  des jeweiligen Geräts, dafür braucht es keinen Cronjob.
+- `login_failures`: Fehlversuche bei der Anmeldung (IP und Zeit). Sie werden nach 15 Minuten gelöscht.
 
 ### Übersicht (Dashboard)
 
@@ -183,13 +184,44 @@ monitor/
 - Es wird nur erfasst, was nötig ist: der Zustand des Geräts. Der Name des angemeldeten Kontos wird nur übertragen, weil es
   Vereinskonten sind, und lässt sich abschalten. Nach 180 Tagen wird alles gelöscht.
 
+### Sicherheitsprüfung vom 25.09.2026
+
+**Kann über das Tool Schadcode auf den Webspace gelangen?** Nein. Der einzige Weg hinein ist `api/report.php`,
+und der verlangt einen gültigen Geräte-Token. Die Meldung wird als JSON geprüft und als Text in SQLite gespeichert.
+Sie wird nie als Datei geschrieben, nie eingebunden und nie ausgeführt. Die Datenbank liegt außerhalb des Web-Roots.
+Es gibt keinen Datei-Upload, kein `eval`, kein `unserialize` und keine Shell-Aufrufe. Alle SQL-Abfragen sind vorbereitet.
+Jede Ausgabe wird escaped, zusätzlich verhindert die CSP eingeschleustes JavaScript.
+
+Bei der Prüfung behoben (Version 0.1.1):
+- Die Datenbank wächst nicht mehr unbegrenzt: mindestens 20 s zwischen zwei Meldungen, höchstens 32 KB pro Meldung,
+  höchstens 2000 Meldungen und 180 Tage pro Gerät. Auch ein gestohlener Token kann den Webspace nicht füllen,
+  den sich das Tool mit der Vereinswebsite teilt.
+- Nach 5 Fehlversuchen ist die Anmeldung für 15 Minuten gesperrt. Die bisherige Wartezeit von 2 s hätte bei vielen parallelen
+  Versuchen PHP-Prozesse des Webspace blockiert.
+- PHP-Fehler erscheinen nie im Browser, sondern nur im Protokoll.
+- `check.php` verlangt PHP 8.3 oder neuer.
+
+Von außen geprüft: keine Verzeichnislisten, versteckte Dateien gesperrt, `config.php` und Daten nicht erreichbar
+(auch nicht über `../`), keine Versionsangaben in den Kopfzeilen, Anfragen ohne Token werden abgewiesen, bevor irgendetwas
+gespeichert wird.
+
+Bewusst in Kauf genommen:
+- Wer einen Token hat, kann für *dieses eine* Gerät falsche Daten melden. Lesen oder steuern kann er damit nichts.
+  Gegenmittel: „Token erneuern“.
+- Der Token steht nach der Installation im PowerShell-Verlauf des Admin-Kontos auf dem Notebook. Nur dieses Konto kann ihn lesen.
+- Die Subdomain ist über die öffentlichen Zertifikatslisten (Certificate Transparency) auffindbar. Die Sicherheit beruht nicht
+  darauf, dass die Adresse geheim bleibt.
+
+Größtes verbleibendes Risiko liegt außerhalb des Codes: der FTP-Zugang zum Webspace. Maßnahmen dazu stehen in
+[server/README.md](server/README.md#sicher-betreiben).
+
 ## Umsetzung in Phasen
 
 | Phase | Inhalt | Wer |
 |---|---|---|
 | **0 – Vorbereitung** | im KAS die Subdomain `monitor.<vereinsdomain>` anlegen, SSL (Let's Encrypt) einschalten, Document Root auf `…/monitor/public` setzen; hochladen, mit `check.php` prüfen und das Passwort einrichten. Anleitung: [server/README.md](server/README.md) | du, ca. 15 min |
 | **1 – Grundversion** ✅ | `report.php` mit SQLite, Übersicht mit Anmeldung, Geräteverwaltung; Agent mit Grunddaten (Build/UBR, Patch-Monat, Update-Verlauf, Neustart, Netzwerk); geplante Aufgabe mit allen drei Auslösern; `install.ps1` und `uninstall.ps1`. Lokal getestet: Agent → Endpunkt → Übersicht. Live seit 25.09.2026: Installation als SYSTEM auf einem Test-PC erfolgreich, die Notebooks folgen | Claude |
-| **2 – Komfort** | ausstehende Updates, Defender, Akku/Festplatte; Ampel; Detailseite mit Online-Zeiten; Aufbewahrungsfrist; Puffer für Offline-Zeiten | Claude |
+| **2 – Komfort** | ausstehende Updates, Defender, Akku/Festplatte; Ampel; Detailseite mit Online-Zeiten; Puffer für Offline-Zeiten (die Aufbewahrungsfrist ist schon mit 0.1.1 gekommen) | Claude |
 | **3 – Heimspiele** | Kalender der Vereinswebsite, Supportende-Tabelle, `cron.php` mit optionalen E-Mail-Warnungen | Claude |
 
 Der Code bleibt klein, ungefähr 300 Zeilen PowerShell und 500 Zeilen PHP/HTML. So lässt er sich auch in ein paar Jahren noch lesen.

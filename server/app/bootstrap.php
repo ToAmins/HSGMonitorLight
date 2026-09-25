@@ -6,13 +6,28 @@ declare(strict_types=1);
  * Ausgabe-Helfer. Liegt außerhalb des Document Root.
  */
 
-const APP_VERSION = '0.1.0';
-const DB_SCHEMA = 1;          // Stand der Datenbankstruktur (PRAGMA user_version)
-const REPORT_SCHEMA = 1;      // Format der Meldungen vom Agenten
-const MAX_REPORT_BYTES = 65536;
+const APP_VERSION = '0.1.1';
+const DB_SCHEMA = 2;               // Stand der Datenbankstruktur (PRAGMA user_version)
+const REPORT_SCHEMA = 1;           // Format der Meldungen vom Agenten
+const MAX_REPORT_BYTES = 32768;    // eine echte Meldung hat etwa 7 KB
+const REPORT_MIN_INTERVAL = 20;    // Sekunden zwischen zwei Meldungen eines Geräts
 const SESSION_DAYS = 14;
+const LOGIN_MAX_FAILURES = 5;      // Fehlversuche pro IP-Adresse ...
+const LOGIN_WINDOW_MINUTES = 15;   // ... innerhalb dieses Zeitraums, danach ist die Anmeldung gesperrt
 
 define('APP_ROOT', dirname(__DIR__));
+
+// Fehler nur ins Protokoll des Webspace schreiben, nie mit Pfaden im Browser anzeigen.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+set_exception_handler(function (Throwable $e): void {
+    error_log('HSGMonitorLight: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+    }
+    echo 'Interner Fehler. Details stehen im Fehlerprotokoll des Webspace.';
+});
 
 // ------------------------------------------------------------------ Konfiguration
 
@@ -25,6 +40,8 @@ function default_config(): array
         'timezone' => 'Europe/Berlin',
         'db_path' => APP_ROOT . '/data/monitor.sqlite',
         'online_minutes' => 75,
+        'keep_days' => 180,
+        'keep_reports' => 2000,
     ];
 }
 
@@ -111,6 +128,13 @@ function migrate(PDO $pdo): void
             )');
             $pdo->exec('CREATE INDEX IF NOT EXISTS reports_device_time ON reports (device_id, received_at)');
         }
+        if ($version < 2) {
+            $pdo->exec('CREATE TABLE IF NOT EXISTS login_failures (
+                ip TEXT NOT NULL,
+                at TEXT NOT NULL
+            )');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS login_failures_ip ON login_failures (ip, at)');
+        }
         $pdo->exec('PRAGMA user_version = ' . DB_SCHEMA);
         $pdo->exec('COMMIT');
     } catch (Throwable $e) {
@@ -156,16 +180,35 @@ function all_devices(): array
     )->fetchAll();
 }
 
+/** Sekunden seit der letzten angenommenen Meldung des Geräts (null = noch nie). */
+function seconds_since_last_report(array $device): ?int
+{
+    $last = to_local($device['last_seen_at'] ?? null);
+    return $last ? time() - $last->getTimestamp() : null;
+}
+
+/**
+ * Speichert eine Meldung und räumt dabei die alten dieses Geräts ab: älter als keep_days
+ * oder jenseits der keep_reports neuesten. So bleibt die Datenbank auch dann begrenzt,
+ * wenn ein Token in falsche Hände gerät.
+ */
 function store_report(int $deviceId, array $payload, string $ip): void
 {
     $pdo = db();
     $now = now_utc();
+    $cutoff = gmdate('Y-m-d\TH:i:s\Z', time() - 86400 * max(1, (int) config('keep_days')));
     $pdo->exec('BEGIN IMMEDIATE');
     try {
         $pdo->prepare('INSERT INTO reports (device_id, received_at, remote_ip, payload) VALUES (?, ?, ?, ?)')
             ->execute([$deviceId, $now, $ip, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)]);
+        $reportId = (int) $pdo->lastInsertId();
         $pdo->prepare('UPDATE devices SET last_seen_at = ?, last_ip = ?, last_report_id = ? WHERE id = ?')
-            ->execute([$now, $ip, (int) $pdo->lastInsertId(), $deviceId]);
+            ->execute([$now, $ip, $reportId, $deviceId]);
+        $pdo->prepare(
+            'DELETE FROM reports WHERE device_id = ? AND id <> ? AND (received_at < ? OR id <= (
+                 SELECT id FROM reports WHERE device_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?
+             ))'
+        )->execute([$deviceId, $reportId, $cutoff, $deviceId, max(1, (int) config('keep_reports'))]);
         $pdo->exec('COMMIT');
     } catch (Throwable $e) {
         $pdo->exec('ROLLBACK');
@@ -360,6 +403,31 @@ function require_login(): void
         header('Location: login.php?next=' . rawurlencode(basename($_SERVER['SCRIPT_NAME'] ?? 'index.php')), true, 303);
         exit;
     }
+}
+
+function client_ip(): string
+{
+    return (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+}
+
+/** Zu viele Fehlversuche von dieser IP-Adresse in den letzten Minuten? */
+function login_blocked(string $ip): bool
+{
+    $since = gmdate('Y-m-d\TH:i:s\Z', time() - 60 * LOGIN_WINDOW_MINUTES);
+    db()->prepare('DELETE FROM login_failures WHERE at < ?')->execute([$since]);
+    $stmt = db()->prepare('SELECT COUNT(*) FROM login_failures WHERE ip = ?');
+    $stmt->execute([$ip]);
+    return (int) $stmt->fetchColumn() >= LOGIN_MAX_FAILURES;
+}
+
+function record_login_failure(string $ip): void
+{
+    db()->prepare('INSERT INTO login_failures (ip, at) VALUES (?, ?)')->execute([$ip, now_utc()]);
+}
+
+function clear_login_failures(string $ip): void
+{
+    db()->prepare('DELETE FROM login_failures WHERE ip = ?')->execute([$ip]);
 }
 
 function csrf_token(): string
