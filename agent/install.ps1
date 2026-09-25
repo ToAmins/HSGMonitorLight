@@ -7,7 +7,8 @@
        Administratoren schreiben. Wichtig, weil der Agent als SYSTEM läuft.
     2. Schreibt Server-Adresse und Token nach "C:\ProgramData\HSGMonitorLight\config.json";
        den Ordner dürfen nur SYSTEM und Administratoren lesen.
-    3. Legt die geplante Aufgabe "HSGMonitorLight" an (Systemstart, neue Netzwerkverbindung, stündlich).
+    3. Legt die geplante Aufgabe "HSGMonitorLight" an (Systemstart, neue Netzwerkverbindung, stündlich –
+       auch ohne Netzwerk, damit der Agent Offline-Zeiten vormerken kann).
     4. Startet die Aufgabe einmal und zeigt, ob die Meldung angekommen ist.
     Erneut ausführen = Agent aktualisieren. Ohne -Url/-Token gelten dann die bisherigen Werte.
 
@@ -121,7 +122,7 @@ $xml = @"
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <AllowHardTerminate>true</AllowHardTerminate>
     <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
     <IdleSettings>
       <StopOnIdleEnd>false</StopOnIdleEnd>
       <RestartOnIdle>false</RestartOnIdle>

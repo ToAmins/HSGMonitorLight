@@ -6,13 +6,14 @@
     Wird von der Aufgabenplanung als SYSTEM gestartet: beim Systemstart, bei jeder neuen
     Netzwerkverbindung und stündlich (eingerichtet von install.ps1). Sammelt ein paar
     Gerätedaten, schickt sie als JSON per HTTPS an den Server und schreibt ein kurzes Protokoll.
+    Ist der Server nicht erreichbar, merkt er sich ein kurzes Lebenszeichen und schickt es später mit.
     Der Server antwortet nur mit "ok" – Befehle nimmt der Agent keine entgegen.
 
 .PARAMETER ConfigPath
     config.json mit Server-Adresse ("url") und Geräte-Token ("token").
 
 .PARAMETER DryRun
-    Nur sammeln und das JSON ausgeben – nichts senden, nichts protokollieren.
+    Nur sammeln und das JSON ausgeben – nichts senden, nichts speichern, nichts protokollieren.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\HSGMonitorLight.ps1 -DryRun
@@ -25,10 +26,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$AgentVersion  = '0.1.0'
+$AgentVersion  = '0.2.0'
 $SchemaVersion = 1
 $Invariant     = [Globalization.CultureInfo]::InvariantCulture
-$LogPath       = Join-Path (Split-Path -Parent $ConfigPath) 'agent.log'
+$DataDir       = Split-Path -Parent $ConfigPath
+$LogPath       = Join-Path $DataDir 'agent.log'
+$StatePath     = Join-Path $DataDir 'state.json'   # letztes Ergebnis der Update-Suche
+$QueuePath     = Join-Path $DataDir 'queue.json'   # Lebenszeichen, die noch nicht zugestellt sind
+$MaxQueue      = 150
 $Problems      = New-Object 'System.Collections.Generic.List[string]'
 $Config        = $null
 
@@ -55,6 +60,10 @@ function Format-Utc($Value, [switch]$AssumeUtc) {
     return $Value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", $Invariant)
 }
 
+function ConvertFrom-Utc([string]$Text) {
+    return [datetime]::Parse($Text, $Invariant, [Globalization.DateTimeStyles]::AdjustToUniversal)
+}
+
 # Führt einen Sammelschritt aus. Scheitert er, fehlt nur dieser Teil in der Meldung.
 function Invoke-Collector([string]$Name, [scriptblock]$Script) {
     try {
@@ -65,6 +74,24 @@ function Invoke-Collector([string]$Name, [scriptblock]$Script) {
         Write-Log "Problem bei $text"
         return $null
     }
+}
+
+function Read-JsonFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Log "Datei nicht lesbar, wird ignoriert: $Path"
+        return $null
+    }
+}
+
+# Erst in eine temporäre Datei schreiben, dann umbenennen – so bleibt nie eine halbe Datei zurück.
+function Write-JsonFile([string]$Path, $Data) {
+    if ($DryRun) { return }
+    $temp = "$Path.tmp"
+    [IO.File]::WriteAllText($temp, (ConvertTo-Json -InputObject $Data -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temp -Destination $Path -Force
 }
 
 # ------------------------------------------------------------------ Sammeln
@@ -139,6 +166,55 @@ function Get-UpdateInfo([string]$Version) {
     }
 }
 
+# Fragt Windows Update, welche Updates noch fehlen. Die Suche geht zu Microsoft und dauert 10 s bis
+# 2 min, deshalb höchstens alle 12 Stunden – außer seit der letzten Suche wurde etwas installiert.
+# Treiber und optionale Updates bleiben außen vor, Defender-Signaturen ebenso.
+function Get-PendingUpdates([string]$CacheKey, [bool]$Online) {
+    $cached = $null
+    $state = Read-JsonFile $StatePath
+    if ($state -and $state.pending -and $state.pending_key -eq $CacheKey) { $cached = $state.pending }
+    if ($cached) {
+        $age = (Get-Date).ToUniversalTime() - (ConvertFrom-Utc $cached.checked_at)
+        if ($age.TotalHours -lt 12) { return $cached }
+    }
+    if (-not $Online) { return $cached }
+
+    try {
+        $searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+        $result = $searcher.Search("IsInstalled=0 and IsHidden=0 and BrowseOnly=0 and Type='Software'")
+    } catch {
+        $Problems.Add("Update-Suche: $($_.Exception.Message)")
+        Write-Log "Update-Suche fehlgeschlagen: $($_.Exception.Message)"
+        return $cached
+    }
+    $items = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($update in $result.Updates) {
+        $title = [string]$update.Title
+        if ($title -match 'KB2267602') { continue }
+        $kb = $null
+        if (@($update.KBArticleIDs).Count -gt 0) { $kb = 'KB' + @($update.KBArticleIDs)[0] }
+        $items.Add([ordered]@{ title = $title; kb = $kb; downloaded = [bool]$update.IsDownloaded })
+    }
+    $pending = [ordered]@{
+        checked_at = Format-Utc (Get-Date)
+        count      = $items.Count
+        items      = @($items | Select-Object -First 20)
+    }
+    Write-JsonFile $StatePath ([ordered]@{ pending_key = $CacheKey; pending = $pending })
+    return $pending
+}
+
+function Get-DefenderInfo {
+    $mp = Get-MpComputerStatus
+    [ordered]@{
+        mode              = [string]$mp.AMRunningMode       # "Normal"; "Passive Mode" = anderer Virenschutz aktiv
+        antivirus_enabled = [bool]$mp.AntivirusEnabled
+        realtime_enabled  = [bool]$mp.RealTimeProtectionEnabled
+        signature_version = [string]$mp.AntivirusSignatureVersion
+        signature_updated = Format-Utc $mp.AntivirusSignatureLastUpdated
+    }
+}
+
 function Get-NetworkInfo {
     $list = New-Object 'System.Collections.Generic.List[object]'
     # Der Profilname ist bei WLAN die SSID. netsh wlan bräuchte ab Windows 11 24H2 die Standortfreigabe.
@@ -168,12 +244,31 @@ function Get-NetworkInfo {
     return $list.ToArray()
 }
 
+# ------------------------------------------------------------------ Puffer für Offline-Zeiten
+
+function Read-Queue {
+    $data = Read-JsonFile $QueuePath
+    foreach ($item in @($data)) { if ($null -ne $item) { $item } }
+}
+
+# Merkt sich ein kurzes Lebenszeichen (Zeit, Netzwerkname), wenn die Meldung nicht zugestellt wurde.
+function Add-Heartbeat($Network) {
+    $queue = @(Read-Queue)
+    $queue += [pscustomobject][ordered]@{
+        at       = Format-Utc (Get-Date)
+        net      = (@($Network | ForEach-Object { $_.name }) -join ', ')
+        internet = (@($Network | Where-Object { $_.internet }).Count -gt 0)
+    }
+    Write-JsonFile $QueuePath @($queue | Select-Object -Last $MaxQueue)
+    return [Math]::Min($queue.Count, $MaxQueue)
+}
+
 # ------------------------------------------------------------------ Senden
 
-function Send-Report([Uri]$Uri, [string]$Json) {
+function Send-Report([Uri]$Uri, [string]$Json, [int]$Attempts) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $body = [Text.Encoding]::UTF8.GetBytes($Json)
-    $pauses = 0, 30, 120
+    $pauses = @(@(0, 30, 120)[0..($Attempts - 1)])
     for ($i = 0; $i -lt $pauses.Count; $i++) {
         if ($pauses[$i] -gt 0) { Start-Sleep -Seconds $pauses[$i] }
         try {
@@ -209,6 +304,14 @@ if (Test-Path -LiteralPath $ConfigPath) {
 $windows = Invoke-Collector 'Windows' { Get-WindowsInfo }
 $version = $null
 if ($windows) { $version = $windows.version }
+$network = @(Invoke-Collector 'Netzwerk' { Get-NetworkInfo } | Where-Object { $null -ne $_ })
+$online  = @($network | Where-Object { $_.internet }).Count -gt 0
+$updates = Invoke-Collector 'Updates' { Get-UpdateInfo $version }
+if ($updates) {
+    $cacheKey = '{0}|{1}' -f $version, $updates.last_install_success
+    $updates['pending'] = Invoke-Collector 'Update-Suche' { Get-PendingUpdates $cacheKey $online }
+}
+$queued = @(Read-Queue)
 
 $report = [ordered]@{
     schema_version = $SchemaVersion
@@ -216,8 +319,10 @@ $report = [ordered]@{
     collected_at   = Format-Utc (Get-Date)
     device         = Invoke-Collector 'Gerät' { Get-DeviceInfo }
     windows        = $windows
-    updates        = Invoke-Collector 'Updates' { Get-UpdateInfo $version }
-    network        = @(Invoke-Collector 'Netzwerk' { Get-NetworkInfo } | Where-Object { $null -ne $_ })
+    updates        = $updates
+    defender       = Invoke-Collector 'Virenschutz' { Get-DefenderInfo }
+    network        = $network
+    offline        = $queued
 }
 $report['errors'] = @($Problems)
 
@@ -233,10 +338,15 @@ if (-not [Uri]::TryCreate([string]$Config.url, [UriKind]::Absolute, [ref]$uri) -
     exit 2
 }
 
+# Meldet Windows kein Internet (z. B. Hallen-WLAN mit Anmeldeseite), nur ein kurzer Versuch.
+$attempts = 1
+if ($online) { $attempts = 3 }
 $json = $report | ConvertTo-Json -Depth 6 -Compress
-if (Send-Report -Uri $uri -Json $json) {
-    Write-Log ('Gemeldet: Build {0}, {1} Netzwerk(e), {2} Problem(e)' -f $version, $report.network.Count, $Problems.Count)
+if (Send-Report -Uri $uri -Json $json -Attempts $attempts) {
+    if ($queued.Count -gt 0) { Remove-Item -LiteralPath $QueuePath -Force -ErrorAction SilentlyContinue }
+    Write-Log ('Gemeldet: Build {0}, {1} Netzwerk(e), {2} nachgereichte(s) Lebenszeichen, {3} Problem(e)' -f $version, $network.Count, $queued.Count, $Problems.Count)
     exit 0
 }
-Write-Log 'Meldung konnte nicht zugestellt werden.'
+$waiting = Add-Heartbeat $network
+Write-Log "Meldung nicht zugestellt – Lebenszeichen vorgemerkt ($waiting warten auf Zustellung)."
 exit 1

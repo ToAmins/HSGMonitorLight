@@ -6,7 +6,8 @@ Das ist einmalig nötig und dauert etwa 15 Minuten.
    Als Ziel den Pfad `/monitor/public/` eintragen (mit `public/` am Ende) und PHP 8.3 oder neuer wählen.
 2. **SSL:** Für die Subdomain ein Let's-Encrypt-Zertifikat aktivieren und „SSL erzwingen“ einschalten.
 3. **Hochladen:** Den *Inhalt* dieses Ordners `server/` per FTP nach `/monitor/` kopieren.
-   Danach muss es `/monitor/public/index.php` geben.
+   Danach muss es `/monitor/public/index.php` geben. Zusätzlich den Ordner `agent/` aus dem Repo nach
+   `/monitor/agent/` hochladen. Dann lässt sich der Agent in der Geräteverwaltung herunterladen.
 4. **Prüfen:** `https://monitor.<vereinsdomain>/check.php` öffnen. Bis auf „config.php“ und „Passwort“
    sollte alles grün sein.
 5. **Passwort:** Auf derselben Seite einen Passwort-Hash erzeugen. Dann `config.example.php` als `config.php`
@@ -21,14 +22,16 @@ Das ist einmalig nötig und dauert etwa 15 Minuten.
 ```
 /monitor/
 ├── .htaccess        sperrt alles außerhalb von public/
+├── agent/           Agent-Dateien für den Download (nur nach Anmeldung über download.php)
 ├── app/             Programmlogik
 ├── config.php       Einstellungen (legst du an, steht nicht im Repo)
 ├── data/            entsteht automatisch: Datenbank und Anmelde-Sitzungen
 └── public/          Document Root der Subdomain
 ```
 
-- **Neue Version:** genauso hochladen. `config.php` und `data/` bleiben dabei unangetastet.
-  Beim ersten Aufruf passt sich die Datenbank selbst an.
+- **Neue Version:** genauso hochladen, `agent/` eingeschlossen. `config.php` und `data/` bleiben dabei unangetastet.
+  Beim ersten Aufruf passt sich die Datenbank selbst an. Hat ein Notebook eine ältere Agent-Version, steht auf
+  seiner Karte „neuere Version verfügbar“.
 - **Sicherung:** `data/monitor.sqlite` herunterladen. Das ist die komplette Datenbank. Geht sie verloren,
   fehlt nur der Verlauf: Geräte neu anlegen und die Agenten mit dem neuen Token neu installieren.
 

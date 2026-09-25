@@ -48,6 +48,8 @@ $devices = all_devices();
 $base = (is_https() ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')
     . rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
 $reportUrl = $base . '/api/report.php';
+$agentVersion = agent_version();
+$zipAvailable = class_exists(ZipArchive::class);
 
 page_header('Geräte', 'admin');
 ?>
@@ -60,12 +62,42 @@ page_header('Geräte', 'admin');
 <?php if ($newToken): ?>
 <section class="card highlight">
   <h2>Installation auf „<?= h($newToken['name']) ?>“</h2>
-  <p>Den Token zeigt diese Seite <strong>nur jetzt</strong> an. Auf dem Notebook eine PowerShell
-     <strong>als Administrator</strong> öffnen, in den Ordner <code>agent</code> wechseln und diesen Befehl ausführen:</p>
-  <pre class="command" id="install-cmd">powershell -ExecutionPolicy Bypass -File .\install.ps1 -Url "<?= h($reportUrl) ?>" -Token "<?= h($newToken['token']) ?>"</pre>
+  <p>Den Token zeigt diese Seite <strong>nur jetzt</strong> an. Am einfachsten direkt auf dem Notebook:</p>
+  <ol class="steps">
+    <?php if ($agentVersion !== null): ?>
+    <li><a href="download.php">Agent herunterladen</a> und die ZIP-Datei nach <code>C:\</code> entpacken
+        (ergibt <code>C:\HSGMonitorLight-agent</code>).</li>
+    <?php else: ?>
+    <li>Den Ordner <code>agent</code> aus dem Repo nach <code>C:\HSGMonitorLight-agent</code> kopieren.</li>
+    <?php endif; ?>
+    <li>PowerShell <strong>als Administrator</strong> öffnen (Startmenü → „PowerShell“ → „Als Administrator ausführen“).</li>
+    <li>Diesen Befehl einfügen und ausführen:</li>
+  </ol>
+  <pre class="command" id="install-cmd">powershell -ExecutionPolicy Bypass -File C:\HSGMonitorLight-agent\install.ps1 -Url "<?= h($reportUrl) ?>" -Token "<?= h($newToken['token']) ?>"</pre>
   <p><button type="button" class="button" data-copy="install-cmd">Befehl kopieren</button></p>
+  <p class="muted small">Liegt der Agent woanders, den Pfad hinter <code>-File</code> anpassen. Nach der Installation
+     kann <code>C:\HSGMonitorLight-agent</code> gelöscht werden. Danach hier abmelden und das Passwort nicht im
+     Browser des Notebooks speichern.</p>
 </section>
 <?php endif; ?>
+
+<section class="card" id="agent">
+  <h2>Agent herunterladen</h2>
+  <?php if ($agentVersion === null): ?>
+    <p class="muted">Auf dem Webspace liegt noch kein Agent. Dafür den Ordner <code>agent</code> aus dem Repo nach
+       <code>/monitor/agent/</code> hochladen (siehe server/README.md).</p>
+  <?php else: ?>
+    <p>Version <?= h($agentVersion) ?> – enthält keinen Token, der kommt über den Befehl beim Anlegen dazu.
+       Ein schon installierter Agent wird aktualisiert, indem man <code>install.ps1</code> ohne Parameter als
+       Administrator ausführt.</p>
+    <?php if ($zipAvailable): ?>
+      <p><a class="button" href="download.php">Agent als ZIP herunterladen</a></p>
+    <?php else: ?>
+      <p>Einzeln herunterladen und in einen gemeinsamen Ordner legen:
+      <?php foreach (AGENT_FILES as $i => $name): ?><?= $i ? ' · ' : '' ?><a href="download.php?file=<?= h(rawurlencode($name)) ?>"><?= h($name) ?></a><?php endforeach; ?></p>
+    <?php endif; ?>
+  <?php endif; ?>
+</section>
 
 <section class="card">
   <h2>Neues Gerät</h2>

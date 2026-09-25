@@ -43,6 +43,10 @@ $checks = [
     ['Passwort eingerichtet', $ready,
         'Unten einen Hash erzeugen und bei admin_password_hash in config.php eintragen.'],
 ];
+$checks[] = ['Agent zum Herunterladen' . (agent_version() ? ' (Version ' . agent_version() . ')' : ''), agent_dir() !== null,
+    'Den Ordner agent aus dem Repo nach /monitor/agent/ hochladen. Ohne ihn fehlt nur der Download in der Geräteverwaltung.'];
+$checks[] = ['ZIP-Erweiterung (zip)', class_exists(ZipArchive::class),
+    'Fehlt – dann bietet die Geräteverwaltung die Agent-Dateien einzeln statt als ZIP an.'];
 if ($config !== null) {
     try {
         db();
