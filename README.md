@@ -13,9 +13,9 @@ Als Server reicht ein gewöhnlicher PHP-Webspace, zum Beispiel bei All-Inkl. Auf
 
 | Ordner | Inhalt |
 |---|---|
-| `agent/` | PowerShell-Agent mit Installer für die Notebooks *(folgt)* |
-| `server/` | PHP-Endpunkt und Übersicht für den Webspace *(folgt)* |
+| `agent/` | PowerShell-Agent mit Installer für die Notebooks: [Anleitung](agent/README.md) |
+| `server/` | PHP-Endpunkt und Übersicht für den Webspace: [Anleitung](server/README.md) |
 
-**Stand:** Planung. Das Konzept steht in [PLAN.md](PLAN.md).
+**Stand:** Grundversion (Phase 1) fertig und lokal getestet. Konzept und nächste Schritte stehen in [PLAN.md](PLAN.md).
 
 Lizenz: [MIT](LICENSE)

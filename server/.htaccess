@@ -1,0 +1,3 @@
+# Sicherheitsnetz: Zeigt der Document Root versehentlich auf diesen Ordner statt auf public/,
+# bleiben config.php, app/ und data/ trotzdem gesperrt.
+Require all denied

@@ -23,7 +23,7 @@ flowchart LR
   end
   subgraph WS["All-Inkl-Webspace"]
     R["api/report.php"] --> DB[("SQLite")]
-    D["Übersicht<br/>(Verzeichnisschutz)"] --> DB
+    D["Übersicht<br/>(mit Anmeldung)"] --> DB
     C["cron.php<br/>(täglich)"] --> DB
   end
   A -- "HTTPS POST (JSON)<br/>+ Geräte-Token" --> R
@@ -70,7 +70,10 @@ Diese Fallstricke sind auf einem Windows-11-25H2-Rechner nachgeprüft:
 - `ProductName` in der Registry meldet auch unter Windows 11 **„Windows 10 Pro“**. Ob es Windows 11 ist,
   erkennt man stattdessen an einer Buildnummer ab 22000.
 - Die neuesten Einträge im Update-Verlauf sind fast immer Defender-Signaturen (KB2267602). Für den
-  Patch-Stand müssen sie herausgefiltert werden.
+  Patch-Stand müssen sie herausgefiltert werden, ebenso die Store-App-Updates.
+- Seit Ende 2025 steht in den Titeln der Windows-Updates der Build, z. B. „2026-09 Sicherheitsupdate (KB5129195)
+  (26200.9457)“. Daraus ergibt sich unabhängig von der Sprache, **welches Monatsupdate** installiert ist und seit wann.
+- Die Zeiten im Update-Verlauf sind UTC, aber nicht so gekennzeichnet.
 - Die WLAN-SSID kommt aus `Get-NetConnectionProfile`. `netsh wlan` verlangt ab Windows 11 24H2 die
   Freigabe des Standorts.
 - Die Suche nach ausstehenden Updates dauert 10 Sekunden bis 2 Minuten. Deshalb läuft sie höchstens alle 12 Stunden,
@@ -107,15 +110,17 @@ das Hochladen per FTP reicht.
 
 ```
 monitor/
+├── .htaccess             sperrt alles, falls der Document Root falsch gesetzt ist
 ├── public/               ← Document Root der Subdomain monitor.<vereinsdomain>
 │   ├── index.php         Übersicht
-│   ├── device.php        Details und Verlauf eines Geräts
 │   ├── admin.php         Gerät anlegen, Token erneuern, Gerät löschen
+│   ├── login.php         Anmeldung
+│   ├── check.php         Einrichtungshilfe: prüft den Webspace, erzeugt den Passwort-Hash
 │   ├── api/report.php    Annahme der Meldungen
-│   ├── cron.php          täglicher Cronjob: Aufräumen, optional Warnungen per E-Mail
-│   └── .htaccess         HTTPS erzwingen, Sicherheits-Header
-├── app/                  Logik, außerhalb des Document Root
-├── data/monitor.sqlite   außerhalb des Document Root, zusätzlich „deny all“
+│   ├── device.php        (Phase 2) Details und Verlauf eines Geräts
+│   └── cron.php          (Phase 2/3) täglicher Cronjob: Aufräumen, optional Warnungen per E-Mail
+├── app/bootstrap.php     Logik, außerhalb des Document Root
+├── data/                 Datenbank und Sitzungen; wird automatisch angelegt und gesperrt
 └── config.php            Einstellungen; nicht im Repo, Vorlage: config.example.php
 ```
 
@@ -130,16 +135,18 @@ monitor/
 
 ### Datenbank
 
-- `devices`: ID, Anzeigename, Token-Hash, zuletzt gesehen, letzte IP, Windows-Version/Build/UBR,
-  Anzahl ausstehender Updates, ob ein Neustart nötig ist, letzte Update-Installation und weitere Kurzfelder.
+- `devices`: ID, Anzeigename, Token-Hash, angelegt am, zuletzt gesehen, letzte IP und ein Verweis auf die letzte Meldung.
+  Die Details liest die Übersicht direkt aus dieser Meldung. So braucht ein neues Feld im Agenten keine Änderung an der Datenbank.
 - `reports`: ID, Gerät, Empfangszeit, öffentliche IP, Rohdaten (JSON).
 - Meldungen werden **180 Tage** aufbewahrt. Aufgeräumt wird täglich per KAS-Cronjob (`cron.php`).
   Ersatzweise räumt auch jede eingehende Meldung auf, höchstens einmal am Tag. So funktioniert es auch ohne Cronjob.
 
 ### Übersicht (Dashboard)
 
-- **Zugangsschutz:** der Verzeichnisschutz aus dem KAS (HTTP-Basic-Auth, per Klick eingerichtet) für alles außer `/api`.
-  Die Formulare auf der Admin-Seite haben zusätzlich einen CSRF-Token.
+- **Zugangsschutz:** eine eigene Anmeldung. Benutzername und Passwort-Hash stehen in `config.php`, die Sitzung hält 14 Tage.
+  Nach einem falschen Passwort wartet die Seite 2 Sekunden, alle Formulare haben einen CSRF-Token.
+  Ursprünglich war der KAS-Verzeichnisschutz geplant. Der schreibt aber eine eigene `.htaccess` und hätte auch
+  `/api` gesperrt. Außerdem lässt sich die eigene Anmeldung lokal testen.
 - **Startseite:** eine Karte pro Notebook, auch auf dem Handy gut lesbar:
   - *Zuletzt online:* Sa 20.09., 19:40 (vor 5 Tagen), dazu öffentliche IP und Netzwerkname
   - *Windows 11 24H2, Build 26100.4652*
@@ -169,6 +176,7 @@ monitor/
   Notebook darf nur SYSTEM bzw. ein Administrator den Token lesen.
 - Die Agent-Dateien dürfen nur Administratoren ändern, weil der Agent als SYSTEM läuft.
 - Es gibt keinen Rückkanal und keine Befehle vom Server.
+- Die Übersicht ist nur nach der Anmeldung erreichbar. Die Seiten senden strenge Sicherheits-Header (CSP, noindex).
 - Datenbank und Konfiguration liegen außerhalb des Web-Roots.
 - **Öffentliches Repo:** Im Code stehen weder Domains noch Tokens noch Passwörter. `config.php` und die Daten
   sind per `.gitignore` ausgeschlossen.
@@ -179,8 +187,8 @@ monitor/
 
 | Phase | Inhalt | Wer |
 |---|---|---|
-| **0 – Vorbereitung** | im KAS die Subdomain `monitor.<vereinsdomain>` anlegen, SSL (Let's Encrypt) einschalten, Document Root auf `…/monitor/public` setzen; `check.php` hochladen, es prüft PHP-Version, PDO-SQLite und Schreibrechte | du, ca. 15 min |
-| **1 – Grundversion** | `report.php` mit SQLite und einfacher Übersicht; Agent mit Grunddaten (Build/UBR, Update-Verlauf, Neustart, Netzwerk); geplante Aufgabe mit allen drei Auslösern; `install.ps1` und `uninstall.ps1`; erst mit dem eigenen PC testen, dann mit einem Notebook | Claude |
+| **0 – Vorbereitung** | im KAS die Subdomain `monitor.<vereinsdomain>` anlegen, SSL (Let's Encrypt) einschalten, Document Root auf `…/monitor/public` setzen; hochladen, mit `check.php` prüfen und das Passwort einrichten. Anleitung: [server/README.md](server/README.md) | du, ca. 15 min |
+| **1 – Grundversion** ✅ | `report.php` mit SQLite, Übersicht mit Anmeldung, Geräteverwaltung; Agent mit Grunddaten (Build/UBR, Patch-Monat, Update-Verlauf, Neustart, Netzwerk); geplante Aufgabe mit allen drei Auslösern; `install.ps1` und `uninstall.ps1`. Lokal getestet: Agent → Endpunkt → Übersicht. Noch offen: Installation als SYSTEM auf einem echten Notebook | Claude |
 | **2 – Komfort** | ausstehende Updates, Defender, Akku/Festplatte; Ampel; Detailseite mit Online-Zeiten; Aufbewahrungsfrist; Puffer für Offline-Zeiten | Claude |
 | **3 – Heimspiele** | Kalender der Vereinswebsite, Supportende-Tabelle, `cron.php` mit optionalen E-Mail-Warnungen | Claude |
 

@@ -1,0 +1,8 @@
+# Dieser Ordner ist der Document Root der Subdomain und darf abgerufen werden
+# (hebt das "Require all denied" aus dem übergeordneten Ordner auf).
+Require all granted
+
+# Versteckte Dateien wie .htaccess nie ausliefern
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
