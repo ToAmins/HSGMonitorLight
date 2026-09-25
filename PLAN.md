@@ -1,4 +1,4 @@
-# Client-Monitor – Plan
+# HSGMonitorLight – Plan
 
 ## Ziel
 
@@ -7,7 +7,7 @@ Für jedes Zeitnehmer-Notebook aus der Ferne sehen:
 - **wann** es zuletzt mit dem Internet verbunden war und **mit welcher IP** (öffentlich und lokal, dazu der Netzwerkname),
 - **welchen Patch-Stand** Windows hat und ob Updates oder ein Neustart ausstehen.
 
-**Rahmen:** zwei Notebooks mit lokalen Benutzerkonten, keine Domäne und kein Intune. Als Server gibt es
+**Rahmen:** zwei Notebooks mit Windows 11 und lokalen Benutzerkonten, keine Domäne und kein Intune. Als Server gibt es
 nur einen All-Inkl-Webspace (PHP, Apache mit `.htaccess`, KAS). Es soll nichts kosten und kaum Pflege brauchen.
 
 **Bewusst nicht enthalten:** Fernsteuerung, Softwareverteilung oder Befehle vom Server an die Notebooks.
@@ -24,11 +24,11 @@ flowchart LR
   subgraph WS["All-Inkl-Webspace"]
     R["api/report.php"] --> DB[("SQLite")]
     D["Übersicht<br/>(Verzeichnisschutz)"] --> DB
-    C["cron.php<br/>(optional)"] --> DB
+    C["cron.php<br/>(täglich)"] --> DB
   end
   A -- "HTTPS POST (JSON)<br/>+ Geräte-Token" --> R
   B["Browser / Handy"] --> D
-  C -. "E-Mail-Warnung" .-> B
+  C -. "E-Mail-Warnung<br/>(optional)" .-> B
 ```
 
 Die Verbindung geht nur in eine Richtung: Das Notebook meldet sich, der Webspace speichert die Meldungen und zeigt sie an.
@@ -86,10 +86,10 @@ Diese Fallstricke sind auf einem Windows-11-25H2-Rechner nachgeprüft:
 
 ### Installation (`install.ps1`, einmal pro Notebook als Administrator ausführen)
 
-1. Das Skript kopiert den Agent nach `C:\Program Files\Client-Monitor\`. Dort dürfen nur Administratoren schreiben.
+1. Das Skript kopiert den Agent nach `C:\Program Files\HSGMonitorLight\`. Dort dürfen nur Administratoren schreiben.
    **Das ist wichtig:** Das Skript läuft als SYSTEM. Könnte ein Standardbenutzer es ändern, hätte er
    volle Rechte auf dem Gerät.
-2. Es schreibt `C:\ProgramData\Client-Monitor\config.json` mit der Server-Adresse und dem Geräte-Token.
+2. Es schreibt `C:\ProgramData\HSGMonitorLight\config.json` mit der Server-Adresse und dem Geräte-Token.
    Lesen dürfen diese Datei nur SYSTEM und Administratoren.
 3. Es legt die geplante Aufgabe an, und zwar aus einer XML-Vorlage, weil sich der Ereignis-Auslöser so am saubersten einrichten lässt.
 4. Es schickt sofort eine Testmeldung und zeigt das Ergebnis an.
@@ -106,13 +106,13 @@ das Hochladen per FTP reicht.
 ### Verzeichnisse
 
 ```
-client-monitor/
-├── public/               ← Document Root der Subdomain
+monitor/
+├── public/               ← Document Root der Subdomain monitor.<vereinsdomain>
 │   ├── index.php         Übersicht
 │   ├── device.php        Details und Verlauf eines Geräts
 │   ├── admin.php         Gerät anlegen, Token erneuern, Gerät löschen
 │   ├── api/report.php    Annahme der Meldungen
-│   ├── cron.php          optional: Warnungen per E-Mail
+│   ├── cron.php          täglicher Cronjob: Aufräumen, optional Warnungen per E-Mail
 │   └── .htaccess         HTTPS erzwingen, Sicherheits-Header
 ├── app/                  Logik, außerhalb des Document Root
 ├── data/monitor.sqlite   außerhalb des Document Root, zusätzlich „deny all“
@@ -133,7 +133,8 @@ client-monitor/
 - `devices`: ID, Anzeigename, Token-Hash, zuletzt gesehen, letzte IP, Windows-Version/Build/UBR,
   Anzahl ausstehender Updates, ob ein Neustart nötig ist, letzte Update-Installation und weitere Kurzfelder.
 - `reports`: ID, Gerät, Empfangszeit, öffentliche IP, Rohdaten (JSON).
-- Meldungen werden **180 Tage** aufbewahrt. Aufgeräumt wird automatisch einmal täglich, sobald eine Meldung eingeht.
+- Meldungen werden **180 Tage** aufbewahrt. Aufgeräumt wird täglich per KAS-Cronjob (`cron.php`).
+  Ersatzweise räumt auch jede eingehende Meldung auf, höchstens einmal am Tag. So funktioniert es auch ohne Cronjob.
 
 ### Übersicht (Dashboard)
 
@@ -151,15 +152,16 @@ client-monitor/
 - **Detailseite:** Die Online-Zeiten werden aus den Meldungen abgeleitet, etwa *„Sa 20.09., 13:05–19:40, WLAN ‚Halle‘,
   IP x.x.x.x“*. Außerdem zeigt sie ausstehende und zuletzt installierte Updates sowie die Rohdaten.
 - **Supportende:** Eine kleine Tabelle in der Konfiguration enthält das Supportende jeder Windows-Version
-  (z. B. 24H2 Home/Pro bis 13.10.2026). Danach richtet sich die rote Ampel.
+  (z. B. Windows 11 24H2 Home/Pro bis 13.10.2026). Danach richtet sich die rote Ampel. Rechtzeitig vorher wird
+  die Karte gelb.
 
 ## Teil 3: Heimspiel-Bezug (optional)
 
 - Die Übersicht liest den **Heimspiel-Kalender der Vereinswebsite** (ICS, Adresse einstellbar) und zeigt zum Beispiel
   *„Nächstes Heimspiel: Sa 04.10. · Notebook 2: 3 Updates ausstehend“*.
-- `cron.php` läuft als Cronjob, im KAS, falls der Tarif Cronjobs hat, sonst über einen kostenlosen externen Dienst
-  wie cron-job.org. **3 Tage vor einem Heimspiel** schickt er eine E-Mail, wenn ein Notebook gelb oder rot ist oder
-  sich seit über 30 Tagen nicht gemeldet hat.
+- **E-Mail-Warnungen (optional, ab Werk aus):** Sind sie in `config.php` eingeschaltet, schickt `cron.php`
+  (KAS-Cronjob) **3 Tage vor einem Heimspiel** eine E-Mail, wenn ein Notebook gelb oder rot ist oder sich seit über 30 Tagen
+  nicht gemeldet hat. Empfänger und Vorlauf lassen sich in der Konfiguration einstellen.
 
 ## Sicherheit und Datenschutz
 
@@ -177,10 +179,10 @@ client-monitor/
 
 | Phase | Inhalt | Wer |
 |---|---|---|
-| **0 – Vorbereitung** | im KAS eine Subdomain anlegen (z. B. `geraete.<vereinsdomain>`), SSL (Let's Encrypt) einschalten, Document Root auf `…/client-monitor/public` setzen; `check.php` hochladen, es prüft PHP-Version, PDO-SQLite und Schreibrechte | du, ca. 15 min |
+| **0 – Vorbereitung** | im KAS die Subdomain `monitor.<vereinsdomain>` anlegen, SSL (Let's Encrypt) einschalten, Document Root auf `…/monitor/public` setzen; `check.php` hochladen, es prüft PHP-Version, PDO-SQLite und Schreibrechte | du, ca. 15 min |
 | **1 – Grundversion** | `report.php` mit SQLite und einfacher Übersicht; Agent mit Grunddaten (Build/UBR, Update-Verlauf, Neustart, Netzwerk); geplante Aufgabe mit allen drei Auslösern; `install.ps1` und `uninstall.ps1`; erst mit dem eigenen PC testen, dann mit einem Notebook | Claude |
 | **2 – Komfort** | ausstehende Updates, Defender, Akku/Festplatte; Ampel; Detailseite mit Online-Zeiten; Aufbewahrungsfrist; Puffer für Offline-Zeiten | Claude |
-| **3 – Heimspiele** | Kalender der Vereinswebsite, `cron.php`, E-Mail-Warnungen, Supportende-Tabelle | Claude |
+| **3 – Heimspiele** | Kalender der Vereinswebsite, Supportende-Tabelle, `cron.php` mit optionalen E-Mail-Warnungen | Claude |
 
 Der Code bleibt klein, ungefähr 300 Zeilen PowerShell und 500 Zeilen PHP/HTML. So lässt er sich auch in ein paar Jahren noch lesen.
 
@@ -198,12 +200,18 @@ Der Code bleibt klein, ungefähr 300 Zeilen PowerShell und 500 Zeilen PHP/HTML. 
 - In Windows Update die **Nutzungszeit** passend setzen, etwa 8 bis 23 Uhr.
 - Die Zeitnehmer-Konten sollten **Standardbenutzer** sein und keine Administratoren. Nur dann schützen die Dateirechte oben wirklich.
 
+## Entscheidungen
+
+| Thema | Entscheidung |
+|---|---|
+| Betriebssystem | Windows 11 auf beiden Notebooks |
+| Server | eigene Subdomain `monitor.<vereinsdomain>` auf dem All-Inkl-Webspace. Die echte Adresse steht nur in der Konfiguration, nicht im Repo |
+| Cronjobs | im Tarif enthalten; `cron.php` läuft täglich über den KAS |
+| E-Mail-Warnungen | nur optional, ab Werk ausgeschaltet |
+
 ## Offene Fragen
 
-1. Laufen die Notebooks mit **Windows 10 oder 11**, und in welcher Version? Home oder Pro?
-   Windows 10 (auch mit der verlängerten Unterstützung ESU) und Windows 11 24H2 Home/Pro bekommen **ab 13.10.2026**
-   keine Sicherheitsupdates mehr.
-2. Passt eine eigene Subdomain? Wie soll sie heißen?
-3. Enthält der All-Inkl-Tarif Cronjobs? Das ist erst für Phase 3 wichtig.
-4. Sollen Warnungen per E-Mail kommen, und an wen?
-5. Welche Lizenz soll das öffentliche Repo haben, zum Beispiel MIT?
+1. Welche **Windows-11-Version** läuft genau (`winver`: 24H2 oder 25H2)? Home oder Pro?
+   24H2 Home/Pro bekommt **ab 13.10.2026** keine Sicherheitsupdates mehr. Dann sollten die Notebooks vorher
+   über Windows Update auf 25H2 gehen. Das ist nur ein kleines Aktivierungspaket mit einem Neustart.
+2. Welche Lizenz soll das öffentliche Repo bekommen (Vorschlag: MIT)?

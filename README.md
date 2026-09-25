@@ -1,4 +1,4 @@
-# Client-Monitor
+# HSGMonitorLight
 
 Ein schlankes Werkzeug, mit dem man eine Handvoll Windows-Notebooks aus der Ferne im Blick behält.
 Gebaut für die Zeitnehmer-Notebooks eines Handballvereins.
