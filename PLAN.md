@@ -188,7 +188,7 @@ monitor/
 | Phase | Inhalt | Wer |
 |---|---|---|
 | **0 – Vorbereitung** | im KAS die Subdomain `monitor.<vereinsdomain>` anlegen, SSL (Let's Encrypt) einschalten, Document Root auf `…/monitor/public` setzen; hochladen, mit `check.php` prüfen und das Passwort einrichten. Anleitung: [server/README.md](server/README.md) | du, ca. 15 min |
-| **1 – Grundversion** ✅ | `report.php` mit SQLite, Übersicht mit Anmeldung, Geräteverwaltung; Agent mit Grunddaten (Build/UBR, Patch-Monat, Update-Verlauf, Neustart, Netzwerk); geplante Aufgabe mit allen drei Auslösern; `install.ps1` und `uninstall.ps1`. Lokal getestet: Agent → Endpunkt → Übersicht. Noch offen: Installation als SYSTEM auf einem echten Notebook | Claude |
+| **1 – Grundversion** ✅ | `report.php` mit SQLite, Übersicht mit Anmeldung, Geräteverwaltung; Agent mit Grunddaten (Build/UBR, Patch-Monat, Update-Verlauf, Neustart, Netzwerk); geplante Aufgabe mit allen drei Auslösern; `install.ps1` und `uninstall.ps1`. Lokal getestet: Agent → Endpunkt → Übersicht. Live seit 25.09.2026: Installation als SYSTEM auf einem Test-PC erfolgreich, die Notebooks folgen | Claude |
 | **2 – Komfort** | ausstehende Updates, Defender, Akku/Festplatte; Ampel; Detailseite mit Online-Zeiten; Aufbewahrungsfrist; Puffer für Offline-Zeiten | Claude |
 | **3 – Heimspiele** | Kalender der Vereinswebsite, Supportende-Tabelle, `cron.php` mit optionalen E-Mail-Warnungen | Claude |
 
