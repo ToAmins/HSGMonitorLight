@@ -204,14 +204,8 @@ Der Code bleibt klein, ungefähr 300 Zeilen PowerShell und 500 Zeilen PHP/HTML. 
 
 | Thema | Entscheidung |
 |---|---|
-| Betriebssystem | Windows 11 auf beiden Notebooks |
+| Betriebssystem | Windows 11 25H2 auf beiden Notebooks |
 | Server | eigene Subdomain `monitor.<vereinsdomain>` auf dem All-Inkl-Webspace. Die echte Adresse steht nur in der Konfiguration, nicht im Repo |
 | Cronjobs | im Tarif enthalten; `cron.php` läuft täglich über den KAS |
 | E-Mail-Warnungen | nur optional, ab Werk ausgeschaltet |
-
-## Offene Fragen
-
-1. Welche **Windows-11-Version** läuft genau (`winver`: 24H2 oder 25H2)? Home oder Pro?
-   24H2 Home/Pro bekommt **ab 13.10.2026** keine Sicherheitsupdates mehr. Dann sollten die Notebooks vorher
-   über Windows Update auf 25H2 gehen. Das ist nur ein kleines Aktivierungspaket mit einem Neustart.
-2. Welche Lizenz soll das öffentliche Repo bekommen (Vorschlag: MIT)?
+| Lizenz | MIT (siehe [LICENSE](LICENSE)) |

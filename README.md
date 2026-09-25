@@ -17,3 +17,5 @@ Als Server reicht ein gewöhnlicher PHP-Webspace, zum Beispiel bei All-Inkl. Auf
 | `server/` | PHP-Endpunkt und Übersicht für den Webspace *(folgt)* |
 
 **Stand:** Planung. Das Konzept steht in [PLAN.md](PLAN.md).
+
+Lizenz: [MIT](LICENSE)
